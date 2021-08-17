@@ -1,4 +1,5 @@
 import time
+import flax
 import jax.numpy as jnp
 import tensorflow_datasets as tfds
 
@@ -15,16 +16,6 @@ def linear(m, n, key, scale=1e-2):
 def init_network_params(sizes, key):
     keys = random.split(key, len(sizes))
     return [linear(m, n, k) for m, n, k in zip(sizes[:-1], sizes[1:], keys)]
-
-
-layer_sizes = [784, 512, 512, 10]
-param_scale = 0.1
-step_size = 0.01
-num_epochs = 10
-batch_size = 128
-n_targets = 10
-
-params = init_network_params(layer_sizes, random.PRNGKey(0))
 
 
 def relu(x):
@@ -67,44 +58,14 @@ def update(params, x, y):
             for (w, b), (dw, db) in zip(params, grads)]
 
 
-def get_train_batches():
-    ds = tfds.load(name='mnist',
-                   split='train',
-                   as_supervised=True,
-                   data_dir=data_dir)
-    ds = ds.batch(batch_size).prefetch(1)
-    return tfds.as_numpy(ds)
+class MLP(object):
+    def __init__(self, layer_sizes, seed=0):
+        self.layer_sizes= layer_sizes
+        self.params = init_network_params(layer_sizes, random.PRNGKey(seed))
 
+    def __call__(self, x):
+        if x.ndim == 2:
+            return batched_predict(self.params, x)
+        else:
+            return predict(self.params, x)
 
-data_dir = "/tmp/tfds"
-mnist_data, info = tfds.load(name="mnist",
-                             batch_size=-1,
-                             data_dir=data_dir,
-                             with_info=True)
-mnist_data = tfds.as_numpy(mnist_data)
-train_data, test_data = mnist_data["train"], mnist_data["test"]
-num_labels = info.features["label"].num_classes
-h, w, c = info.features["image"].shape
-num_pixels = h * w * c
-
-train_images, train_labels = train_data["image"], train_data["label"]
-train_images = jnp.reshape(train_images, (len(train_images), num_pixels))
-train_labels = one_hot(train_labels, num_labels)
-
-test_images, test_labels = test_data["image"], test_data["label"]
-test_images = jnp.reshape(test_images, (len(test_images), num_pixels))
-test_labels = one_hot(test_labels, num_labels)
-
-for epoch in range(num_epochs):
-    start = time.time()
-    for x, y in get_train_batches():
-        x = jnp.reshape(x, (len(x), num_pixels))
-        y = one_hot(y, num_labels)
-        params = update(params, x, y)
-    epoch_time = time.time() - start
-
-    train_acc = accuracy(params, train_images, train_labels)
-    test_acc = accuracy(params, test_images, test_labels)
-    print("Epoch {} in {:0.2f} sec".format(epoch, epoch_time))
-    print("Training set accuracy {}".format(train_acc))
-    print("Testing set accuracy {}".format(test_acc))

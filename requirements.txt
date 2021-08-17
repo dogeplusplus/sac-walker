@@ -5,3 +5,4 @@ box2d-py
 jax
 brax
 numpy
+flax
