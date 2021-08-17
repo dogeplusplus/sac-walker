@@ -1,2 +1,7 @@
 pre-commit
 pytest
+gym
+box2d-py
+jax
+brax
+numpy
