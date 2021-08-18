@@ -1,7 +1,8 @@
 import pytest
 import jax.numpy as jnp
 
-from models.mlp import MLP, relu, predict, linear
+from models.mlp import MLP, relu, predict, linear, init_network_params
+from jax import random
 
 
 def test_relu():
@@ -21,6 +22,8 @@ def test_mlp():
     pred_batch = model(batch)
     assert pred_batch.shape == (2, 10)
 
-def test_training():
-    # TODO:
-    pass
+def test_init_network_params():
+    layers = [1,2,3]
+    params = init_network_params(layers, key=random.PRNGKey(0))
+    for i, param in enumerate(params):
+        assert param[0].shape[::-1] == tuple(layers[i:i+2]), "Layer sizes not compatible"

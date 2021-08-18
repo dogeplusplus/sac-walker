@@ -35,22 +35,6 @@ def predict(params, image):
 
 batched_predict = vmap(predict, in_axes=(None, 0))
 
-
-def one_hot(x, k, dtype=jnp.float32):
-    return jnp.array(x[:, None] == jnp.arange(k), dtype)
-
-
-def accuracy(params, images, targets):
-    target_class = jnp.argmax(targets, axis=1)
-    predicted_class = jnp.argmax(batched_predict(params, images), axis=1)
-    return jnp.mean(predicted_class == target_class)
-
-
-def loss(params, images, targets):
-    preds = batched_predict(params, images)
-    return -jnp.mean(preds * targets)
-
-
 @jit
 def update(params, x, y):
     grads = grad(loss)(params, x, y)
@@ -69,3 +53,5 @@ class MLP(object):
         else:
             return predict(self.params, x)
 
+    def update(self, x, y):
+        update(self.params, x, y)
