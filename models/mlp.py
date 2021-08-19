@@ -22,11 +22,11 @@ def relu(x):
     return jnp.maximum(0, x)
 
 
-def predict(params, image):
+def predict(params, image, activation_fn=relu):
     activations = image
     for w, b in params[:-1]:
         outputs = jnp.dot(w, activations) + b
-        activations = relu(outputs)
+        activations = activation_fn(outputs)
 
     final_w, final_b = params[-1]
     logits = jnp.dot(final_w, activations) + final_b
@@ -34,6 +34,7 @@ def predict(params, image):
 
 
 batched_predict = vmap(predict, in_axes=(None, 0))
+
 
 @jit
 def update(params, x, y):
@@ -43,7 +44,7 @@ def update(params, x, y):
 
 
 class MLP(object):
-    def __init__(self, layer_sizes, seed=0):
+    def __init__(self, layer_sizes, seed):
         self.layer_sizes= layer_sizes
         self.params = init_network_params(layer_sizes, random.PRNGKey(seed))
 
@@ -55,3 +56,15 @@ class MLP(object):
 
     def update(self, x, y):
         update(self.params, x, y)
+
+
+class MLPActor(MLP):
+    def __init__(self, obs_dim, act_dim, hidden_layers, seed):
+        layer_sizes = [obs_dim] + hidden_layers + [act_dim]
+        super().__init__(layer_sizes, seed)
+
+
+class QFunction(MLP):
+    def __init__(self, obs_dim, act_dim, hidden_layers, seed):
+        layer_sizes = [obs_dim + act_dim] + hidden_layers + [1]
+        super().__init__(layer_sizes, seed)
