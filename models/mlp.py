@@ -24,13 +24,12 @@ def relu(x):
 
 def predict(params, image, activation_fn=relu):
     activations = image
-    for w, b in params[:-1]:
+    for w, b in params:
         outputs = jnp.dot(w, activations) + b
         activations = activation_fn(outputs)
 
-    final_w, final_b = params[-1]
-    logits = jnp.dot(final_w, activations) + final_b
-    return logits - logsumexp(logits)
+    logits = activations
+    return logits
 
 
 batched_predict = vmap(predict, in_axes=(None, 0))
@@ -44,9 +43,21 @@ def update(params, x, y):
 
 
 class MLP(object):
-    def __init__(self, layer_sizes, seed):
+    def __init__(self, layer_sizes, activation_fn, seed):
+        w_key, b_key = random.split(seed)
         self.layer_sizes= layer_sizes
         self.params = init_network_params(layer_sizes, random.PRNGKey(seed))
+
+        self.activation_fn = activation_fn
+
+    def forward(self, x):
+        activations = x
+        for w, b in self.params:
+            outputs = jnp.dot(w, activations) + b
+            activations = self.activation_fn(outputs)
+
+        logits = activations
+        return logits
 
     def __call__(self, x):
         if x.ndim == 2:
@@ -58,10 +69,26 @@ class MLP(object):
         update(self.params, x, y)
 
 
-class MLPActor(MLP):
-    def __init__(self, obs_dim, act_dim, hidden_layers, seed):
-        layer_sizes = [obs_dim] + hidden_layers + [act_dim]
-        super().__init__(layer_sizes, seed)
+class MLPActor(object):
+    def __init__(self, obs_dim, act_dim, hidden_layers, activation_fn, seed):
+        net_seed, mu_seed, std_seed = random.split(seed, 3)
+        layer_sizes = [obs_dim] + hidden_layers
+        self.net_params = init_network_params(layer_sizes, net_seed)
+        self.mu_params = init_network_params([layer_sizes[-1], act_dim], mu_seed)[0]
+        self.log_std_params = init_network_params([layer_sizes[-1], act_dim], std_seed)[0]
+
+
+    def forward(self, x):
+        seed = np.random.randint(0, 10000)
+
+        for w, b in self.params:
+            x = jnp.dot(w, x) + b
+            x = self.activation_fn(x)
+
+        mu = jnp.dot(self.mu_params[0], x) + self.mu_params[1]
+        log_std = jnp.dot(self.std_params[0], x) + self.std_params[1]
+
+        return mu + jnp.exp(log_std) * random.normal(random.PRNGKey(seed))
 
 
 class QFunction(MLP):
