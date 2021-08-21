@@ -1,5 +1,6 @@
 import time
 import flax
+import numpy as np
 import jax.numpy as jnp
 import tensorflow_datasets as tfds
 
@@ -70,25 +71,36 @@ class MLP(object):
 
 
 class MLPActor(object):
-    def __init__(self, obs_dim, act_dim, hidden_layers, activation_fn, seed):
+    def __init__(self, obs_dim, act_dim, hidden_layers, activation_fn, act_limit, seed):
         net_seed, mu_seed, std_seed = random.split(seed, 3)
         layer_sizes = [obs_dim] + hidden_layers
-        self.net_params = init_network_params(layer_sizes, net_seed)
-        self.mu_params = init_network_params([layer_sizes[-1], act_dim], mu_seed)[0]
-        self.log_std_params = init_network_params([layer_sizes[-1], act_dim], std_seed)[0]
+        self._activation_fn = activation_fn
+        self._net_params = init_network_params(layer_sizes, net_seed)
+        self._mu_params = init_network_params([layer_sizes[-1], act_dim], mu_seed)[0]
+        self._log_std_params = init_network_params([layer_sizes[-1], act_dim], std_seed)[0]
+        self._params = self.net_params + [self.mu_params, self.log_std_params]
+        self._act_limit = act_limit
+
+    @property
+    def params(self):
+        return self._params
 
 
-    def forward(self, x):
+    def __call__(self, x):
         seed = np.random.randint(0, 10000)
 
-        for w, b in self.params:
+        for w, b in self._net_params:
             x = jnp.dot(w, x) + b
-            x = self.activation_fn(x)
+            x = self._activation_fn(x)
 
-        mu = jnp.dot(self.mu_params[0], x) + self.mu_params[1]
-        log_std = jnp.dot(self.std_params[0], x) + self.std_params[1]
+        mu = jnp.dot(self._mu_params[0], x) + self._mu_params[1]
+        log_std = jnp.dot(self._std_params[0], x) + self._std_params[1]
+        std = jnp.exp(log_std)
 
-        return mu + jnp.exp(log_std) * random.normal(random.PRNGKey(seed))
+        prob = mu + jnp.exp(log_std) * random.normal(random.PRNGKey(seed))
+        pi_action = jnp.tanh(prob) * self._act_limit
+
+        return pi_action
 
 
 class QFunction(MLP):
