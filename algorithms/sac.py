@@ -1,8 +1,10 @@
 import numpy as np
-import jax.numpy as jnp
 
-from dataclass import dataclass
-from model.mlp import SACActor, SACCritic
+from random import sample
+from jax.random import split
+from dataclasses import dataclass
+
+from models.mlp import MLPActor, QFunction
 
 
 @dataclass(frozen=True)
@@ -34,15 +36,18 @@ class ReplayBuffer(object):
         self.done[self.ptr] = done
         self.ptr += 1
 
-    def sample(self):
-        self.ptr = 0
+    def sample(self, batch_size):
+        assert self.ptr >= batch_size, "Number of samples less than batch size."
+        assert self.ptr <= self.size, "Number of samples must be at most buffer size."
+
+        idx = sample(range(self.ptr), batch_size)
 
         return Batch(
-            self.state,
-            self.actions,
-            self.rewards,
-            self.next_state,
-            self.donei
+            self.state[idx],
+            self.actions[idx],
+            self.rewards[idx],
+            self.next_state[idx],
+            self.done[idx]
         )
 
 
@@ -57,15 +62,16 @@ class TrainingParameters:
     alpha: float
     gamma: float
     polyak: float
+    buffer_size: int = int(1e6)
 
 
 class SAC(object):
-    def __init__(self, env, policy, q1, q2, buffer_size, params: TrainingParameters):
+    def __init__(self, env, policy, q1, q2, params: TrainingParameters):
         self.env = env
-        self.policy = = policy
+        self.policy = policy
         self.q1 = q1
         self.q2 = q2
-        self.buffer = ReplayBuffer(buffer_size, env.observation_size,
+        self.buffer = ReplayBuffer(params.buffer_size, env.observation_size,
                                    env.action_size)
         self.params = params
 
@@ -77,7 +83,7 @@ class SAC(object):
         for i in range(params.epochs * params.steps_per_epoch):
             epoch = i // params.steps_per_epoch
 
-            action = self.ac.step(state)
+            action = self.policy(state)
 
             next_state, reward, done, _ = self.env.step(action)
             self.buffer.store(state, action, reward, next_state, done)
@@ -89,18 +95,18 @@ class SAC(object):
 
             state = self.env.reset()
 
-            if i % update_every == 0:
-                samples = buffer.sample()
+            if i % params.update_every == 0:
+                samples = self.buffer.sample(params.batch_size)
                 self.update(samples, params.num_updates)
 
     def update(self, data, num_updates):
         for j in range(num_updates):
             reward = data.reward
             done = data.done
-            state = data.state
+            states = data.state
             actions = data.actions
 
-            state_action = np.concat([state, action], axis=-1)
+            state_action = np.concat([states, actions], axis=-1)
             min_target = min(self.q1(state_action), self.q2(state_action))
             target = reward + self.params.gamma * min_target - self.params.alpha
 
@@ -112,7 +118,7 @@ class Trainer(object):
         self._actor_1 = None
         self._actor_2 = None
         self._critic = None
-        self._training_parameters = {}
+        self._training_parameters = None
 
     @property
     def env(self):
@@ -129,30 +135,32 @@ class Trainer(object):
 
     @training_parameters.setter
     def training_parameters(self, params: TrainingParameters):
-        # TODO: Enforce checks of mandatory parameters
         self._training_parameters = params
 
-    def produce_actors(self, hidden_sizes, seed):
+    def produce_actor(self, hidden_sizes, activation_fn, act_limit, seed):
         assert self.env is not None, "Environment must be set before networks."
         obs_dim = self.env.observation_size.size
         act_dim = self.env.action_size.size
 
-        self._actor1 = SACActor(obs_dim, act_dim, hidden_sizes, seed)
-        self._actor2 = SACActor(obs_dim, act_dim, hidden_sizes, seed + 1)
+        self._actor = MLPActor(obs_dim, act_dim, hidden_sizes, activation_fn, act_limit, seed)
 
-    def produce_critics(self, hidden_sizes, seed):
+    def produce_critics(self, hidden_sizes, activation_fn, seed):
         assert self.env is not None, "Environment must be set before networks."
         obs_dim = self.env.observation_size.size
+        act_dim = self.env.action_size.size
 
-        self._critic = SACCritic(obs_dim, hidden_sizes, seed)
+        seed_1, seed_2 = split(seed)
+
+        self._critic_1 = QFunction(obs_dim, act_dim, hidden_sizes, activation_fn, seed_1)
+        self._critic_2 = QFunction(obs_dim, act_dim, hidden_sizes, activation_fn, seed_2)
 
     def train(self):
         assert self._env is not None, "Environment must be set before training."
-        assert self._critic is not None, "Critic must be set before training."
-        assert self._actor1 is not None and self._actor2 is not None, "Actors must be set before training."
+        assert self._critic_1 is not None and self._critic_2 is not None, "Critics must be set before training."
+        assert self._actor, "Actor must be set before training."
         assert self._training_parameters is not None, "No training parameters provided."
 
-        sac = SAC(self._env, self._actor1, self._critic, self._training_parameters)
+        sac = SAC(self._env, self._actor, self._critic_1, self._critic_2, self._training_parameters)
         sac.train()
 
 
