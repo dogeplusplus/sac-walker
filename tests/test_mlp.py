@@ -25,7 +25,6 @@ def test_init_network_params():
     for i, param in enumerate(params):
         assert param[0].shape[::-1] == tuple(layers[i:i+2]), "Layer sizes not compatible"
 
-@pytest.mark.skip("WIP: try to get dimensions right.")
 def test_sac_actor():
     obs_dim = 1
     act_dim = 4
@@ -35,16 +34,17 @@ def test_sac_actor():
     actor = MLPActor(obs_dim, act_dim, hidden_sizes, activation_fn, act_limit, seed=random.PRNGKey(0))
 
     single = jnp.zeros((obs_dim))
-    pred_single = actor(single)
-    assert pred_single.shape == (act_dim,)
+    mu, log_std = actor(single)
+    assert mu.shape == (act_dim,)
+    assert log_std.shape == (act_dim,)
 
     # Extra dimension for std deviation
     batch = jnp.zeros((2, obs_dim))
-    pred_batch = actor(batch)
-    assert pred_batch.shape == (2, 2, act_dim)
+    mu, log_std = actor(batch)
+    assert mu.shape == (2, act_dim)
+    assert log_std.shape == (2, act_dim)
 
 
-@pytest.mark.skip("WIP: try to get dimensions right.")
 def test_sac_critic():
     obs_dim = 4
     act_dim = 5
