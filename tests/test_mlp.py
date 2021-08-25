@@ -2,7 +2,16 @@ import pytest
 import jax.numpy as jnp
 
 from jax import random
-from models.mlp import MLPActor, QFunction, relu, linear, init_network_params
+from copy import deepcopy
+
+from models.mlp import (
+    MLPActor,
+    QFunction,
+    relu,
+    linear,
+    init_network_params,
+    update
+)
 
 
 def test_linear():
@@ -31,7 +40,14 @@ def test_sac_actor():
     hidden_sizes = [4, 8, 16]
     activation_fn = relu
     act_limit = 1e-2
-    actor = MLPActor(obs_dim, act_dim, hidden_sizes, activation_fn, act_limit, seed=random.PRNGKey(0))
+    actor = MLPActor(
+            obs_dim,
+            act_dim,
+            hidden_sizes,
+            activation_fn,
+            act_limit,
+            seed=random.PRNGKey(0)
+            )
 
     single = jnp.zeros((obs_dim))
     mu, log_std = actor(single)
@@ -60,3 +76,4 @@ def test_sac_critic():
     batch = jnp.zeros((2, input_dim))
     pred_batch = critic(batch)
     assert pred_batch.shape == (2, 1)
+
