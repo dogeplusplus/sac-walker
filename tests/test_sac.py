@@ -31,7 +31,7 @@ def sac():
         learning_rate=1e-3,
         alpha=0.5,
         gamma=0.99,
-        polyak=0.99,
+        polyak=0.5,
         buffer_size=100,
     )
 
@@ -96,3 +96,32 @@ def test_pi_update(sac, samples):
     for component in ["net", "mu", "log_std"]:
         pi_updated = jnp.any(pi_old[component][0][0] != pi_new[component][0][0])
         assert pi_updated, "Policy network did not update."
+
+def test_target_update(sac, samples):
+    q1_targ_params = deepcopy(sac.ac_targ.q1.params)
+    q2_targ_params = deepcopy(sac.ac_targ.q2.params)
+
+    sac.update_q(0, samples)
+
+    q1_params = deepcopy(sac.ac.q1.params)
+    q2_params = deepcopy(sac.ac.q2.params)
+
+    sac.update_targets()
+
+    expected_q1_weights = 0.5 * (q1_targ_params[0][0] + q1_params[0][0])
+    expected_q2_weights = 0.5 * (q2_targ_params[0][0] + q2_params[0][0])
+
+    actual_q1_weights = sac.ac_targ.q1.params[0][0]
+    actual_q2_weights = sac.ac_targ.q2.params[0][0]
+
+    assert jnp.allclose(expected_q1_weights, actual_q1_weights), "Polyak weight averaging failed for Q1"
+    assert jnp.allclose(expected_q2_weights, actual_q2_weights), "Polyak weight averaging failed for Q2"
+
+    expected_q1_biases = 0.5 * (q1_targ_params[0][1] + q1_params[0][1])
+    expected_q2_biases = 0.5 * (q2_targ_params[0][1] + q2_params[0][1])
+
+    actual_q1_biases = sac.ac_targ.q1.params[0][1]
+    actual_q2_biases = sac.ac_targ.q2.params[0][1]
+
+    assert jnp.allclose(expected_q1_biases, actual_q1_biases), "Polyak bias averaging failed for Q1"
+    assert jnp.allclose(expected_q2_biases, actual_q2_biases), "Polyak bias averaging failed for Q2"

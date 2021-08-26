@@ -1,13 +1,13 @@
-import jax
+import gym
 import jax.numpy as jnp
 
-from jax import jit, grad
+from jax import jit, grad, random
 from copy import deepcopy
 from functools import partial
 from dataclasses import dataclass
 from jax.experimental.optimizers import adam
 
-from models.mlp import ActorCritic
+from models.mlp import ActorCritic, relu
 from sac.buffer import ReplayBuffer
 
 
@@ -24,6 +24,7 @@ class TrainingParameters:
     gamma: float
     polyak: float
     buffer_size: int = int(1e6)
+    max_ep_len: int = 4000
 
 
 class SAC(object):
@@ -37,9 +38,9 @@ class SAC(object):
             env.action_space.shape[0],
         )
         self.params = params
-        self.pi_opt_init, self.pi_opt_update, self.pi_get_params = adam(1e-3)
+        self.pi_opt_init, self.pi_opt_update, self.pi_get_params = adam(params.learning_rate)
         self.pi_opt_state = self.pi_opt_init(self.ac.pi.params)
-        self.q_opt_init, self.q_opt_update, self.q_get_params = adam(1e-3)
+        self.q_opt_init, self.q_opt_update, self.q_get_params = adam(params.learning_rate)
         self.q_params = {"q1": self.ac.q1.params, "q2": self.ac.q2.params}
         self.q_opt_state = self.q_opt_init(self.q_params)
 
@@ -104,11 +105,35 @@ class SAC(object):
         pi_params = self.pi_get_params(self.pi_opt_state)
         self.ac.pi.params = pi_params
 
+    def update_targets(self):
+        targ_q1 = self.ac_targ.q1.params
+        targ_q2 = self.ac_targ.q2.params
+
+        source_q1 = self.ac.q1.params
+        source_q2 = self.ac.q2.params
+
+        polyak = self.params.polyak
+
+        for i, _ in enumerate(self.ac_targ.q1.params):
+            # weights and biases
+            self.ac_targ.q1.params[i] = (
+                polyak * targ_q1[i][0] + (1 - polyak) * source_q1[i][0],
+                polyak * targ_q1[i][1] + (1 - polyak) * source_q1[i][1],
+            )
+            self.ac_targ.q2.params[i] = (
+                polyak * targ_q2[i][0] + (1 - polyak) * source_q2[i][0],
+                polyak * targ_q2[i][1] + (1 - polyak) * source_q2[i][1],
+            )
+
+
     def train(self):
         state = self.env.reset()
+        self.env.render()
         params = self.params
 
         step = 0
+        ep_ret = 0
+        ep_len = 0
 
         for i in range(params.epochs * params.steps_per_epoch):
             epoch = i // params.steps_per_epoch
@@ -116,15 +141,21 @@ class SAC(object):
             action = self.ac.act(state)
 
             next_state, reward, done, _ = self.env.step(action)
+            ep_len += 1
+            ep_ret += reward
+
             self.buffer.store(state, action, reward, next_state, done)
             state = next_state
 
             # TODO: Implement environment reset and epoch termination
-            timeout = ep_len == self.max_ep_len
+            timeout = ep_len == params.max_ep_len
             terminal = done or timeout
-            epoch_ended = t == steps_per_epoch - 1
+            epoch_ended = i % params.steps_per_epoch == params.steps_per_epoch - 1
 
-            state = self.env.reset()
+            if terminal or epoch_ended:
+                state = self.env.reset()
+                ep_ret = 0
+                ep_len = 0
 
             if i % params.update_every == 0:
                 for _ in range(params.num_updates):
@@ -193,4 +224,27 @@ class Trainer(object):
 
 
 def main():
-    pass
+    trainer = Trainer()
+    env = gym.make("BipedalWalker-v3")
+    trainer.env = env
+
+    training_params = TrainingParameters(
+        epochs=10,
+        steps_per_epoch=4000,
+        batch_size=100,
+        start_steps=20000,
+        update_every=1000,
+        num_updates=50,
+        learning_rate=1e-3,
+        alpha=0.99,
+        gamma=0.99,
+        polyak=0.99
+    )
+    trainer.training_parameters = training_params
+
+    hidden_sizes = [256, 256]
+    activation_fn = relu
+    act_limit = 10
+    seed = random.PRNGKey(1337)
+    trainer.create_actor_critic(hidden_sizes, activation_fn, act_limit, seed)
+    trainer.train()
