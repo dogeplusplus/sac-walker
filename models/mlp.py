@@ -25,15 +25,6 @@ def softplus(x, beta=1, threshold=20):
     return jnp.where(beta * x > threshold, x, softp)
 
 
-@jit
-def update(params, x, loss, step_size):
-    grads = grad(loss)(params, x)
-    return [
-        (w - step_size * dw, b - step_size * db)
-        for (w, b), (dw, db) in zip(params, grads)
-    ]
-
-
 class MLPActor(object):
     def __init__(
         self,
@@ -51,9 +42,7 @@ class MLPActor(object):
         self._activation_fn = activation_fn
         net_params = init_network_params(layer_sizes, net_seed)
         mu_params = init_network_params([layer_sizes[-1], act_dim], mu_seed)[0]
-        log_std_params = init_network_params(
-            [layer_sizes[-1], act_dim], std_seed
-        )[0]
+        log_std_params = init_network_params([layer_sizes[-1], act_dim], std_seed)[0]
         self._params = {
             "net": net_params,
             "mu": mu_params,
@@ -70,7 +59,9 @@ class MLPActor(object):
 
     @params.setter
     def params(self, params):
-        assert params.keys() == self._params.keys(), "Parameter dictionary does not match."
+        assert (
+            params.keys() == self._params.keys()
+        ), "Parameter dictionary does not match."
         self._params = params
 
     @partial(jit, static_argnums=((0, 3, 4)))
@@ -94,21 +85,13 @@ class MLPActor(object):
 
         logprob = None
         if with_logprob:
-            logprob = norm.logpdf(prob, mu, std)
-            logprob -= 2 * jnp.sum(
-                jnp.log(2) - prob - softplus(-2 * prob), axis=-1, keepdims=True
-            )
-
+            logprob = jnp.sum(norm.logpdf(prob, mu, std), axis=-1)
+            logprob -= 2 * jnp.sum(jnp.log(2) - prob - softplus(-2 * prob), axis=-1)
         pi_action = jnp.tanh(prob) * self._act_limit
         return (pi_action, logprob)
 
     def __call__(self, x, deterministic=False, with_logprob=True):
-        return self.predict(
-            self._params,
-            x,
-            deterministic,
-            with_logprob
-        )
+        return self.predict(self._params, x, deterministic, with_logprob)
 
 
 class QFunction(object):
@@ -140,8 +123,10 @@ class QFunction(object):
 
 class ActorCritic(object):
     def __init__(self, obs_dim, act_dim, hidden_layers, activation_fn, act_limit, seed):
-        pi_seed = q1_seed, q2_seed = random.split(seed, 3)
-        self.pi = MLPActor(obs_dim, act_dim, hidden_layers, activation_fn, act_limit, pi_seed)
+        pi_seed, q1_seed, q2_seed = random.split(seed, 3)
+        self.pi = MLPActor(
+            obs_dim, act_dim, hidden_layers, activation_fn, act_limit, pi_seed
+        )
         self.q1 = QFunction(obs_dim, act_dim, hidden_layers, activation_fn, q1_seed)
         self.q2 = QFunction(obs_dim, act_dim, hidden_layers, activation_fn, q2_seed)
 

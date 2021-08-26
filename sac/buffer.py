@@ -5,10 +5,10 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class Batch:
-    state: np.ndarray
+    states: np.ndarray
     actions: np.ndarray
     rewards: np.ndarray
-    next_state: np.ndarray
+    next_states: np.ndarray
     done: np.ndarray
 
 

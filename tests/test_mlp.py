@@ -1,8 +1,6 @@
-import pytest
 import jax.numpy as jnp
 
 from jax import random
-from copy import deepcopy
 
 from models.mlp import (
     MLPActor,
@@ -10,7 +8,6 @@ from models.mlp import (
     relu,
     linear,
     init_network_params,
-    update
 )
 
 
@@ -29,10 +26,13 @@ def test_relu():
 
 
 def test_init_network_params():
-    layers = [1,2,3]
+    layers = [1, 2, 3]
     params = init_network_params(layers, key=random.PRNGKey(0))
     for i, param in enumerate(params):
-        assert param[0].shape[::-1] == tuple(layers[i:i+2]), "Layer sizes not compatible"
+        assert param[0].shape[::-1] == tuple(
+            layers[i : i + 2]
+        ), "Layer sizes not compatible"
+
 
 def test_sac_actor():
     obs_dim = 1
@@ -41,24 +41,25 @@ def test_sac_actor():
     activation_fn = relu
     act_limit = 1e-2
     actor = MLPActor(
-            obs_dim,
-            act_dim,
-            hidden_sizes,
-            activation_fn,
-            act_limit,
-            seed=random.PRNGKey(0)
-            )
+        obs_dim,
+        act_dim,
+        hidden_sizes,
+        activation_fn,
+        act_limit,
+        random.PRNGKey(0)
+    )
 
     single = jnp.zeros((obs_dim))
     mu, log_std = actor(single)
     assert mu.shape == (act_dim,)
-    assert log_std.shape == (act_dim,)
+    # TODO: verify that the log std of the probability should be dim 1
+    assert log_std.shape == ()
 
     # Extra dimension for std deviation
     batch = jnp.zeros((2, obs_dim))
     mu, log_std = actor(batch)
     assert mu.shape == (2, act_dim)
-    assert log_std.shape == (2, act_dim)
+    assert log_std.shape == (2,)
 
 
 def test_sac_critic():
@@ -76,4 +77,3 @@ def test_sac_critic():
     batch = jnp.zeros((2, input_dim))
     pred_batch = critic(batch)
     assert pred_batch.shape == (2, 1)
-
