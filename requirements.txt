@@ -6,3 +6,4 @@ jax
 brax
 numpy
 flax
+tqdm

@@ -1,4 +1,7 @@
+import sys
+sys.path.append(".")
 import gym
+import tqdm
 import jax.numpy as jnp
 
 from jax import jit, grad, random
@@ -17,8 +20,8 @@ class TrainingParameters:
     steps_per_epoch: int
     batch_size: int
     start_steps: int
+    update_after: int
     update_every: int
-    num_updates: int
     learning_rate: float
     alpha: float
     gamma: float
@@ -75,7 +78,7 @@ class SAC(object):
         q2 = self.ac.q2(sa2)
 
         q_pi = jnp.min(jnp.concatenate([q1, q2], axis=-1), axis=-1)
-        loss_pi = jnp.mean(q_pi - self.params.alpha * logp_pi)
+        loss_pi = jnp.mean(self.params.alpha * logp_pi - q_pi)
         return loss_pi
 
     def update_q(self, step, samples):
@@ -128,60 +131,83 @@ class SAC(object):
 
     def train(self):
         state = self.env.reset()
-        self.env.render()
         params = self.params
 
         step = 0
         ep_ret = 0
         ep_len = 0
 
-        for i in range(params.epochs * params.steps_per_epoch):
-            epoch = i // params.steps_per_epoch
+        for e in range(params.epochs):
+            pbar = tqdm.tqdm(
+                range(params.steps_per_epoch),
+                desc=f"Epoch {e+1:>4}",
+                bar_format="{l_bar}{bar:10}{r_bar}{bar:-10b}"
+            )
+            cumulative_metrics = {
+                "q_loss": 0,
+                "pi_loss": 0,
+            }
+            for i in pbar:
+                if step < self.params.start_steps:
+                    action = self.env.action_space.sample()
+                else:
+                    action = self.ac.act(state)
 
-            action = self.ac.act(state)
+                next_state, reward, done, _ = self.env.step(action)
+                # self.env.render()
+                ep_len += 1
+                ep_ret += reward
 
-            next_state, reward, done, _ = self.env.step(action)
-            ep_len += 1
-            ep_ret += reward
+                self.buffer.store(state, action, reward, next_state, done)
+                state = next_state
 
-            self.buffer.store(state, action, reward, next_state, done)
-            state = next_state
+                # TODO: Implement environment reset and epoch termination
+                timeout = ep_len == params.max_ep_len
+                terminal = done or timeout
+                epoch_ended = i % params.steps_per_epoch == params.steps_per_epoch - 1
 
-            # TODO: Implement environment reset and epoch termination
-            timeout = ep_len == params.max_ep_len
-            terminal = done or timeout
-            epoch_ended = i % params.steps_per_epoch == params.steps_per_epoch - 1
+                if terminal or epoch_ended:
+                    state = self.env.reset()
+                    ep_ret = 0
+                    ep_len = 0
 
-            if terminal or epoch_ended:
-                state = self.env.reset()
-                ep_ret = 0
-                ep_len = 0
+                if step > params.update_after and step % params.update_every == 0:
+                    for _ in range(params.update_every):
+                        samples = self.buffer.sample(params.batch_size)
+                        q_loss = self.q_loss(
+                            self.q_params,
+                            samples.states,
+                            samples.actions,
+                            samples.rewards,
+                            samples.next_states,
+                            samples.done,
+                        )
 
-            if i % params.update_every == 0:
-                for _ in range(params.num_updates):
-                    samples = self.buffer.sample(params.batch_size)
-                    q_loss = self.q_loss(
-                        self.q_params,
-                        samples.states,
-                        samples.actions,
-                        samples.rewards,
-                        samples.next_states,
-                        samples.done,
-                    )
+                        pi_loss = self.pi_loss(
+                            self.ac.pi.params,
+                            samples.states,
+                            samples.next_states,
+                        )
 
-                    pi_loss = self.pi_loss(
-                        self.ac.pi.params,
-                        samples.states,
-                        samples.next_states,
-                    )
+                        self.update_q(step, samples)
+                        self.update_pi(step, samples)
+                        self.update_targets()
 
-                    self.update_q(step, samples)
-                    self.update_pi(step, samples)
-                    step += 1
+                        cumulative_metrics["pi_loss"] += pi_loss
+                        cumulative_metrics["q_loss"] += q_loss
 
-                    print(
-                        f"Epoch {epoch:04d}: Q-Loss: {q_loss}, Policy Loss: {pi_loss}"
-                    )
+                        metrics = {
+                            "Episode Length": ep_len,
+                            "Cumulative Reward": ep_ret,
+                            "Q Loss": f"{cumulative_metrics['q_loss'] / (i + 1):.4g}",
+                            "PI Loss": f"{cumulative_metrics['pi_loss'] / (i + 1):.4g}",
+                        }
+                        pbar.set_postfix(metrics)
+
+                step += 1
+            state = self.env.reset()
+            ep_ret = 0
+            ep_len = 0
 
 
 class Trainer(object):
@@ -232,11 +258,11 @@ def main():
         epochs=10,
         steps_per_epoch=4000,
         batch_size=100,
-        start_steps=20000,
-        update_every=1000,
-        num_updates=50,
+        start_steps=10000,
+        update_after=1000,
+        update_every=50,
         learning_rate=1e-3,
-        alpha=0.99,
+        alpha=0.2,
         gamma=0.99,
         polyak=0.99
     )
@@ -248,3 +274,6 @@ def main():
     seed = random.PRNGKey(1337)
     trainer.create_actor_critic(hidden_sizes, activation_fn, act_limit, seed)
     trainer.train()
+
+if __name__ == "__main__":
+    main()
