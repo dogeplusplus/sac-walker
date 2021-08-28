@@ -4,7 +4,7 @@ import gym
 import tqdm
 import jax.numpy as jnp
 
-from jax import jit, grad, random
+from jax import jit, random
 from copy import deepcopy
 from functools import partial
 from dataclasses import dataclass
