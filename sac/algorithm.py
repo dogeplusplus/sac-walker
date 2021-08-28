@@ -1,5 +1,5 @@
 import sys
-sys.path.append(".")
+import jax
 import gym
 import tqdm
 import jax.numpy as jnp
@@ -10,6 +10,7 @@ from functools import partial
 from dataclasses import dataclass
 from jax.experimental.optimizers import adam
 
+sys.path.append(".")
 from models.mlp import ActorCritic, relu
 from sac.buffer import ReplayBuffer
 
@@ -82,7 +83,7 @@ class SAC(object):
         return loss_pi
 
     def update_q(self, step, samples):
-        grad_q = grad(self.q_loss)(
+        loss_q, grad_q = jax.value_and_grad(self.q_loss)(
             self.q_get_params(self.q_opt_state),
             samples.states,
             samples.actions,
@@ -97,8 +98,10 @@ class SAC(object):
         self.ac.q1.params = self.q_params["q1"]
         self.ac.q2.params = self.q_params["q2"]
 
+        return loss_q
+
     def update_pi(self, step, samples):
-        grad_pi = grad(self.pi_loss)(
+        loss_pi, grad_pi = jax.value_and_grad(self.pi_loss)(
             self.pi_get_params(self.pi_opt_state),
             samples.states,
             samples.next_states,
@@ -107,6 +110,8 @@ class SAC(object):
         self.pi_opt_state = self.pi_opt_update(step, grad_pi, self.pi_opt_state)
         pi_params = self.pi_get_params(self.pi_opt_state)
         self.ac.pi.params = pi_params
+
+        return loss_pi
 
     def update_targets(self):
         targ_q1 = self.ac_targ.q1.params
@@ -174,23 +179,9 @@ class SAC(object):
                 if step > params.update_after and step % params.update_every == 0:
                     for _ in range(params.update_every):
                         samples = self.buffer.sample(params.batch_size)
-                        q_loss = self.q_loss(
-                            self.q_params,
-                            samples.states,
-                            samples.actions,
-                            samples.rewards,
-                            samples.next_states,
-                            samples.done,
-                        )
 
-                        pi_loss = self.pi_loss(
-                            self.ac.pi.params,
-                            samples.states,
-                            samples.next_states,
-                        )
-
-                        self.update_q(step, samples)
-                        self.update_pi(step, samples)
+                        q_loss = self.update_q(step, samples)
+                        pi_loss = self.update_pi(step, samples)
                         self.update_targets()
 
                         cumulative_metrics["pi_loss"] += pi_loss
