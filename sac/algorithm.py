@@ -139,10 +139,11 @@ class SAC(object):
         params = self.params
 
         step = 0
-        ep_ret = 0
-        ep_len = 0
 
         for e in range(params.epochs):
+            ep_ret = 0
+            ep_len = 0
+
             pbar = tqdm.tqdm(
                 range(params.steps_per_epoch),
                 desc=f"Epoch {e+1:>4}",
@@ -153,7 +154,7 @@ class SAC(object):
                 "pi_loss": 0,
             }
             for i in pbar:
-                if step < self.params.start_steps:
+                if step < params.start_steps:
                     action = self.env.action_space.sample()
                 else:
                     action = self.ac.act(state)
@@ -242,7 +243,7 @@ class Trainer(object):
 
 def main():
     trainer = Trainer()
-    env = gym.make("BipedalWalker-v3")
+    env = gym.make("MountainCarContinuous-v0")
     trainer.env = env
 
     training_params = TrainingParameters(
