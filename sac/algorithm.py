@@ -1,19 +1,40 @@
 import sys
 import jax
 import gym
+import flax
 import tqdm
+import optax
 import jax.numpy as jnp
 
-from jax import jit, random
 from copy import deepcopy
+from jax import jit, random
 from functools import partial
 from dataclasses import dataclass
-from jax.experimental.optimizers import adam
+from flax import traverse_util
+from flax.core import freeze, unfreeze
 
 sys.path.append(".")
-from models.mlp import ActorCritic, relu
 from sac.buffer import ReplayBuffer
+from models.mlp import ActorCritic, relu
 
+
+def flat_params(params):
+    params = unfreeze(params)
+    flat = {
+        "/".join(k): v for k,
+        v in traverse_util.flatten_dict(params).items()
+    }
+    return flat 
+
+
+def unflat_params(flat_params):
+    unflat = traverse_util.unflatten_dict({
+        tuple(k.split('/')): v 
+        for k, v in flat_params.items()
+    })
+    unflat = freeze(unflat)
+
+    return unflat
 
 @dataclass(frozen=True)
 class TrainingParameters:
@@ -42,24 +63,20 @@ class SAC(object):
             env.action_space.shape[0],
         )
         self.params = params
-        self.pi_opt_init, self.pi_opt_update, self.pi_get_params = adam(params.learning_rate)
-        self.pi_opt_state = self.pi_opt_init(self.ac.pi.params)
-        self.q_opt_init, self.q_opt_update, self.q_get_params = adam(params.learning_rate)
-        self.q_params = {"q1": self.ac.q1.params, "q2": self.ac.q2.params}
-        self.q_opt_state = self.q_opt_init(self.q_params)
+
 
     @partial(jit, static_argnums=(0,))
-    def q_loss(self, q_weights, s, a, r, s2, d):
+    def q_loss(self, q_params, s, a, r, s2, d):
 
         sa = jnp.concatenate([s, a], axis=-1)
-        q1 = self.ac.q1.predict(q_weights["q1"], sa)
-        q2 = self.ac.q2.predict(q_weights["q2"], sa)
+        q1 = self.ac.q1.apply(q_params["q1"], sa)
+        q2 = self.ac.q2.apply(q_params["q2"], sa)
 
-        a2, logp_ac = self.ac.pi(s2)
+        a2, logp_ac = self.ac.pi.apply(self.ac.pi_state.params, s2)
         sa2 = jnp.concatenate([s2, a2], axis=-1)
 
-        q1_target = self.ac_targ.q1(sa2)
-        q2_target = self.ac_targ.q2(sa2)
+        q1_target = self.ac_targ.q1.apply(self.ac_targ.q_state.params["q1"], sa2)
+        q2_target = self.ac_targ.q2.apply(self.ac_targ.q_state.params["q2"], sa2)
         q_target = jnp.where(q1_target < q2_target, q1_target, q2_target)
 
         backup = r + self.params.gamma * (1 - d) * (
@@ -72,67 +89,54 @@ class SAC(object):
         return loss_q
 
     @partial(jit, static_argnums=(0,))
-    def pi_loss(self, pi_weights, s, s2):
-        pi, logp_pi = self.ac.pi.predict(pi_weights, s2)
+    def pi_loss(self, pi_params, s, s2):
+        pi, logp_pi = self.ac.pi.apply(pi_params, s2)
         sa2 = jnp.concatenate([s, pi], axis=-1)
-        q1 = self.ac.q1(sa2)
-        q2 = self.ac.q2(sa2)
+        q1 = self.ac.q1.apply(self.ac.q_state.params["q1"], sa2)
+        q2 = self.ac.q2.apply(self.ac.q_state.params["q2"], sa2)
 
         q_pi = jnp.min(jnp.concatenate([q1, q2], axis=-1), axis=-1)
         loss_pi = jnp.mean(self.params.alpha * logp_pi - q_pi)
+
         return loss_pi
 
-    def update_q(self, step, samples):
+    def update_q(self, q_state, samples):
         loss_q, grad_q = jax.value_and_grad(self.q_loss)(
-            self.q_get_params(self.q_opt_state),
+            q_state.params,
             samples.states,
             samples.actions,
             samples.rewards,
             samples.next_states,
             samples.done,
         )
+        q_state = q_state.apply_gradients(grads=grad_q)
 
-        self.q_opt_state = self.q_opt_update(step, grad_q, self.q_opt_state)
-        self.q_params = self.q_get_params(self.q_opt_state)
+        return (q_state, loss_q)
 
-        self.ac.q1.params = self.q_params["q1"]
-        self.ac.q2.params = self.q_params["q2"]
-
-        return loss_q
-
-    def update_pi(self, step, samples):
+    def update_pi(self, pi_state, samples):
         loss_pi, grad_pi = jax.value_and_grad(self.pi_loss)(
-            self.pi_get_params(self.pi_opt_state),
+            pi_state.params,
             samples.states,
             samples.next_states,
         )
+        pi_state = pi_state.apply_gradients(grads=grad_pi)
 
-        self.pi_opt_state = self.pi_opt_update(step, grad_pi, self.pi_opt_state)
-        pi_params = self.pi_get_params(self.pi_opt_state)
-        self.ac.pi.params = pi_params
-
-        return loss_pi
+        return (pi_state, loss_pi)
 
     def update_targets(self):
-        targ_q1 = self.ac_targ.q1.params
-        targ_q2 = self.ac_targ.q2.params
 
-        source_q1 = self.ac.q1.params
-        source_q2 = self.ac.q2.params
+        targ_params = self.ac_targ.q_state.params
+        source_params = self.ac.q_state.params
 
+        targ_flat = flat_params(targ_params)
+        source_flat = flat_params(source_params)
         polyak = self.params.polyak
 
-        for i, _ in enumerate(self.ac_targ.q1.params):
-            # weights and biases
-            self.ac_targ.q1.params[i] = (
-                polyak * targ_q1[i][0] + (1 - polyak) * source_q1[i][0],
-                polyak * targ_q1[i][1] + (1 - polyak) * source_q1[i][1],
-            )
-            self.ac_targ.q2.params[i] = (
-                polyak * targ_q2[i][0] + (1 - polyak) * source_q2[i][0],
-                polyak * targ_q2[i][1] + (1 - polyak) * source_q2[i][1],
-            )
+        for k in targ_flat.keys():
+            targ_flat[k] = polyak * targ_flat[k] + (1 - polyak) * source_flat[k]
 
+        new_targ_params = unflat_params(targ_flat)
+        self.ac_targ.q_state.replace(params=new_targ_params)
 
     def train(self):
         state = self.env.reset()
@@ -181,8 +185,8 @@ class SAC(object):
                     for _ in range(params.update_every):
                         samples = self.buffer.sample(params.batch_size)
 
-                        q_loss = self.update_q(step, samples)
-                        pi_loss = self.update_pi(step, samples)
+                        self.ac.q_state, q_loss = self.update_q(self.ac.q_state, samples)
+                        self.ac.pi_state, pi_loss = self.update_pi(self.ac.pi_state, samples)
                         self.update_targets()
 
                         cumulative_metrics["pi_loss"] += pi_loss
@@ -226,10 +230,18 @@ class Trainer(object):
 
     def create_actor_critic(self, hidden_sizes, activation_fn, act_limit, seed):
         assert self.env is not None, "Environment must be set before networks."
+        assert self._training_parameters is not None, "No training parameters provided."
+
         obs_dim = self.env.observation_space.shape[0]
         act_dim = self.env.action_space.shape[0]
-        self._ac = ActorCritic(
-            obs_dim, act_dim, hidden_sizes, activation_fn, act_limit, seed
+        learning_rate = self._training_parameters.learning_rate
+        self._ac = ActorCritic(obs_dim,
+            act_dim,
+            hidden_sizes,
+            activation_fn,
+            act_limit,
+            learning_rate,
+            seed
         )
 
     def train(self):

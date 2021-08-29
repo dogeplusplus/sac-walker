@@ -7,3 +7,4 @@ brax
 numpy
 flax
 tqdm
+optax
