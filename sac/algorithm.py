@@ -1,9 +1,7 @@
 import sys
 import jax
 import gym
-import flax
 import tqdm
-import optax
 import jax.numpy as jnp
 
 from copy import deepcopy
@@ -24,7 +22,7 @@ def flat_params(params):
         "/".join(k): v for k,
         v in traverse_util.flatten_dict(params).items()
     }
-    return flat 
+    return flat
 
 
 def unflat_params(flat_params):
@@ -185,8 +183,10 @@ class SAC(object):
                     for _ in range(params.update_every):
                         samples = self.buffer.sample(params.batch_size)
 
-                        self.ac.q_state, q_loss = self.update_q(self.ac.q_state, samples)
-                        self.ac.pi_state, pi_loss = self.update_pi(self.ac.pi_state, samples)
+                        # self.ac.q_state, q_loss = self.update_q(self.ac.q_state, samples)
+                        # self.ac.pi_state, pi_loss = self.update_pi(self.ac.pi_state, samples)
+                        pi_loss = 0
+                        q_loss = 0
                         self.update_targets()
 
                         cumulative_metrics["pi_loss"] += pi_loss
