@@ -109,7 +109,6 @@ def test_pi_update(sac, samples):
     assert jnp.any(first_bias(pi_old) != first_bias(pi_new))
 
 
-@pytest.mark.skip("Test failing. Figure out why.")
 def test_target_update(sac, samples):
     q1_targ_params = deepcopy(sac.ac_targ.q_state.params["q1"])
     q2_targ_params = deepcopy(sac.ac_targ.q_state.params["q2"])

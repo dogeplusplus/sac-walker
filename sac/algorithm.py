@@ -136,7 +136,7 @@ class SAC(object):
             targ_flat[k] = polyak * targ_flat[k] + (1 - polyak) * source_flat[k]
 
         new_targ_params = unflat_params(targ_flat)
-        self.ac_targ.q_state.replace(params=new_targ_params)
+        self.ac_targ.q_state = self.ac_targ.q_state.replace(params=new_targ_params)
 
     def train(self):
         state = self.env.reset()
