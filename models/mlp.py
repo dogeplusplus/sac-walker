@@ -109,3 +109,7 @@ class ActorCritic(object):
             params=params_pi,
             tx=tx,
         )
+
+    def act(self, x, deterministic=False):
+        a, _ = self.pi.apply(self.pi_state.params, x, deterministic, False)
+        return a

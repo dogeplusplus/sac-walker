@@ -92,11 +92,10 @@ def test_q_loss(sac, samples):
     assert loss_q >= 0, "Loss should be at least 0."
 
 
-@pytest.mark.skip("PI Loss less than zero check this")
 def test_pi_loss(sac, samples):
     pi_weights = sac.ac.pi_state.params
     loss_pi = sac.pi_loss(pi_weights, samples.states, samples.next_states)
-    assert loss_pi >= 0, "Loss should be at least 0."
+    assert loss_pi <= 0, "Loss should be at most 0 for gradient ascent."
 
 
 def test_pi_update(sac, samples):
