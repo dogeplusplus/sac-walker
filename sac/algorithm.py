@@ -27,7 +27,7 @@ def flat_params(params):
 
 def unflat_params(flat_params):
     unflat = traverse_util.unflatten_dict({
-        tuple(k.split('/')): v 
+        tuple(k.split('/')): v
         for k, v in flat_params.items()
     })
     unflat = freeze(unflat)
@@ -183,8 +183,8 @@ class SAC(object):
                     for _ in range(params.update_every):
                         samples = self.buffer.sample(params.batch_size)
 
-                        # self.ac.q_state, q_loss = self.update_q(self.ac.q_state, samples)
-                        # self.ac.pi_state, pi_loss = self.update_pi(self.ac.pi_state, samples)
+                        self.ac.q_state, q_loss = self.update_q(self.ac.q_state, samples)
+                        self.ac.pi_state, pi_loss = self.update_pi(self.ac.pi_state, samples)
                         pi_loss = 0
                         q_loss = 0
                         self.update_targets()
