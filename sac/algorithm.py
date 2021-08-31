@@ -2,18 +2,18 @@ import sys
 import jax
 import gym
 import tqdm
+import flax
 import jax.numpy as jnp
 
 from copy import deepcopy
 from jax import jit, random
 from functools import partial
-from dataclasses import dataclass
 from flax import traverse_util
 from flax.core import freeze, unfreeze
 
 sys.path.append(".")
 from sac.buffer import ReplayBuffer
-from models.mlp import ActorCritic, relu
+from models.mlp import Actor, Critic
 
 
 def flat_params(params):
@@ -34,7 +34,52 @@ def unflat_params(flat_params):
 
     return unflat
 
-@dataclass(frozen=True)
+@jit
+def q_loss(critic_params, critic, actor, target_critic, batch, gamma, alpha):
+    q1, q2 = critic.apply(critic_params, batch.states, batch.actions)
+
+    a2, logp_ac = actor.apply(actor.params, batch.next_states)
+
+    q1_target, q2_target = target_critic(batch.next_states, a2)
+    q_target = jnp.where(q1_target < q2_target, q1_target, q2_target)
+
+    backup = batch.rewards + gamma * (1 - batch.done) * (
+        q_target - alpha * logp_ac
+    )
+
+    loss_q1 = jnp.mean((q1 - backup) ** 2)
+    loss_q2 = jnp.mean((q2 - backup) ** 2)
+    loss_q = loss_q1 + loss_q2
+
+    return loss_q
+
+@jit
+def pi_loss(actor, critic, batch, alpha):
+    pi, logp_pi = actor(batch.next_states)
+    q1, q2 = critic(batch.states, pi)
+
+    q_pi = jnp.where(q1 < q2, q1, q2)
+    loss_pi = jnp.mean(alpha * logp_pi - q_pi)
+
+    return loss_pi
+
+def update_q(actor, critic, target_critic, batch ,gamma, alpha):
+    def loss_fn(critic_params):
+        return q_loss(
+            critic_params,
+            critic,
+            actor,
+            target_critic,
+            batch,
+            gamma,
+            alpha
+        )
+
+    new_critic = critic.apply_gradient(loss_fn)
+    return new_critic
+
+
+@struct.dataclass(frozen=True)
 class TrainingParameters:
     epochs: int
     steps_per_epoch: int
@@ -61,42 +106,6 @@ class SAC(object):
             env.action_space.shape[0],
         )
         self.params = params
-
-
-    @partial(jit, static_argnums=(0,))
-    def q_loss(self, q_params, s, a, r, s2, d):
-
-        sa = jnp.concatenate([s, a], axis=-1)
-        q1 = self.ac.q1.apply(q_params["q1"], sa)
-        q2 = self.ac.q2.apply(q_params["q2"], sa)
-
-        a2, logp_ac = self.ac.pi.apply(self.ac.pi_state.params, s2)
-        sa2 = jnp.concatenate([s2, a2], axis=-1)
-
-        q1_target = self.ac_targ.q1.apply(self.ac_targ.q_state.params["q1"], sa2)
-        q2_target = self.ac_targ.q2.apply(self.ac_targ.q_state.params["q2"], sa2)
-        q_target = jnp.where(q1_target < q2_target, q1_target, q2_target)
-
-        backup = r + self.params.gamma * (1 - d) * (
-            q_target - self.params.alpha * logp_ac
-        )
-
-        loss_q1 = jnp.mean((q1 - backup) ** 2)
-        loss_q2 = jnp.mean((q2 - backup) ** 2)
-        loss_q = loss_q1 + loss_q2
-        return loss_q
-
-    @partial(jit, static_argnums=(0,))
-    def pi_loss(self, pi_params, s, s2):
-        pi, logp_pi = self.ac.pi.apply(pi_params, s2)
-        sa2 = jnp.concatenate([s, pi], axis=-1)
-        q1 = self.ac.q1.apply(self.ac.q_state.params["q1"], sa2)
-        q2 = self.ac.q2.apply(self.ac.q_state.params["q2"], sa2)
-
-        q_pi = jnp.min(jnp.concatenate([q1, q2], axis=-1), axis=-1)
-        loss_pi = jnp.mean(self.params.alpha * logp_pi - q_pi)
-
-        return loss_pi
 
     def update_q(self, q_state, samples):
         loss_q, grad_q = jax.value_and_grad(self.q_loss)(
@@ -280,4 +289,3 @@ def main():
     trainer.train()
 
 if __name__ == "__main__":
-    main()

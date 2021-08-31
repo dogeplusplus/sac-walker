@@ -1,9 +1,9 @@
 import numpy as np
 
+from flax import struct
 from random import sample
-from dataclasses import dataclass
 
-@dataclass(frozen=True)
+@struct.dataclass
 class Batch:
     states: np.ndarray
     actions: np.ndarray
@@ -45,5 +45,3 @@ class ReplayBuffer(object):
             self.next_state[idx],
             self.done[idx]
         )
-
-
