@@ -185,8 +185,6 @@ class SAC(object):
 
                         self.ac.q_state, q_loss = self.update_q(self.ac.q_state, samples)
                         self.ac.pi_state, pi_loss = self.update_pi(self.ac.pi_state, samples)
-                        pi_loss = 0
-                        q_loss = 0
                         self.update_targets()
 
                         cumulative_metrics["pi_loss"] += pi_loss
