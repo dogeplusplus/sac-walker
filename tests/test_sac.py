@@ -95,7 +95,7 @@ def test_q_loss(sac, samples):
 def test_pi_loss(sac, samples):
     pi_weights = sac.ac.pi_state.params
     loss_pi = sac.pi_loss(pi_weights, samples.states, samples.next_states)
-    assert loss_pi <= 0, "Loss should be at most 0 for gradient ascent."
+    assert loss_pi != 0, "Loss should be non-zero 0 for gradient ascent."
 
 
 def test_pi_update(sac, samples):
