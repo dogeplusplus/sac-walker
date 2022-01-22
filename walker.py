@@ -1,7 +1,7 @@
 import gym
 import numpy as np
 
-env = gym.make("BipedalWalker-v3")
+env = gym.make("Humanoid-v2")
 env.render()
 
 def random_games():
