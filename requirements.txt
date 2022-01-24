@@ -9,3 +9,4 @@ optax
 pre-commit
 pytest
 tqdm
+haiku
