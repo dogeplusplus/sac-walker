@@ -223,6 +223,9 @@ class SAC(object):
 
                 step += 1
 
+            state = self.env.reset()
+            ep_ret = 0
+            ep_len = 0
 
 def main():
     env = gym.make("Humanoid-v2")
@@ -240,9 +243,9 @@ def main():
         polyak=0.99
     )
 
-
     sac = SAC(env, training_params)
     sac.train()
+
 
 if __name__ == "__main__":
     main()
